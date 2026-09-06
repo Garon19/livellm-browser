@@ -18,6 +18,8 @@ def mock_page():
     page.query_selector_all = AsyncMock(return_value=[])
     page.close = AsyncMock()
     page.screenshot = AsyncMock(return_value=b"fake_png_bytes")
+    page.on = MagicMock()
+    page.remove_listener = MagicMock()
 
     # Mock locator for xpath selectors
     mock_locator = MagicMock()

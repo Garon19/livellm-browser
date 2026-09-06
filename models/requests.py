@@ -31,6 +31,85 @@ class SearchHintsRequest(BaseModel):
     wait: float = Field(default=1.5, description="Time in seconds to wait for suggestions to appear after typing")
 
 
+class LentaBootstrapRequest(BaseModel):
+    """Bootstrap one session-scoped Lenta storefront context."""
+
+    timeout: float = Field(default=30000, gt=0, le=120000)
+
+
+class LentaItemRequest(BaseModel):
+    """Fetch one canonical Lenta item using a bootstrapped browser session."""
+
+    url: str = Field(..., description="Canonical lenta.com /product/...-<id>/ URL")
+    timeout: float = Field(default=30000, gt=0, le=120000)
+
+    @model_validator(mode="after")
+    def validate_product_url(self):
+        import re
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(self.url)
+        if parsed.scheme != "https" or parsed.hostname not in {"lenta.com", "www.lenta.com"}:
+            raise ValueError("url must be an HTTPS lenta.com product URL")
+        match = re.fullmatch(r"/product/.+-(\d+)/?", parsed.path)
+        if match is None or parsed.query or parsed.fragment:
+            raise ValueError("url must be a canonical /product/...-<id>/ URL")
+        return self
+
+    @property
+    def product_id(self) -> str:
+        import re
+        from urllib.parse import urlsplit
+
+        match = re.fullmatch(r"/product/.+-(\d+)/?", urlsplit(self.url).path)
+        return match.group(1)
+
+
+class UtkonosBootstrapRequest(BaseModel):
+    """Bootstrap one session-scoped Utkonos storefront context."""
+
+    timeout: float = Field(default=30000, gt=0, le=120000)
+
+
+class UtkonosListingRequest(BaseModel):
+    """Fetch one bounded Utkonos catalog page."""
+
+    category_id: str = Field(..., pattern=r"^\d+$")
+    limit: int = Field(default=40, ge=1, le=40)
+    offset: int = Field(default=0, ge=0)
+
+
+class UtkonosItemRequest(BaseModel):
+    """Fetch one canonical Utkonos item using a bootstrapped session."""
+
+    url: str = Field(..., description="Canonical utkonos.ru /item/<sku>/ URL")
+    timeout: float = Field(default=30000, gt=0, le=120000)
+
+    @model_validator(mode="after")
+    def validate_product_url(self):
+        import re
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(self.url)
+        if parsed.scheme != "https" or parsed.hostname not in {
+            "utkonos.ru",
+            "www.utkonos.ru",
+        }:
+            raise ValueError("url must be an HTTPS utkonos.ru product URL")
+        match = re.fullmatch(r"/item/(\d+)/?", parsed.path)
+        if match is None or parsed.query or parsed.fragment:
+            raise ValueError("url must be a canonical /item/<sku>/ URL")
+        return self
+
+    @property
+    def product_id(self) -> str:
+        import re
+        from urllib.parse import urlsplit
+
+        match = re.fullmatch(r"/item/(\d+)/?", urlsplit(self.url).path)
+        return match.group(1)
+
+
 class ContentRequest(BaseModel):
     """
     Get page content with automatic scrolling.
@@ -51,6 +130,19 @@ class ContentRequest(BaseModel):
     steps: int = Field(default=8, ge=0, description="Number of scroll steps (0 = no scroll, 4-12 recommended)")
     step_delay: float = Field(default=1.5, description="Delay between scroll steps in seconds")
     step_pixels: int = Field(default=1500, description="Pixels to scroll per step")
+    include_network_trace: bool = Field(
+        default=False,
+        description=(
+            "Return content and bounded browser request/response trace data in a JSON envelope. "
+            "Includes complete URLs, query values, request/response headers, and request bodies."
+        ),
+    )
+    network_trace_limit: int = Field(
+        default=1000,
+        ge=1,
+        le=5000,
+        description="Maximum network entries returned when include_network_trace is enabled.",
+    )
 
 
 class ProxySettings(BaseModel):

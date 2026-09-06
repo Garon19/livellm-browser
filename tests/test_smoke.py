@@ -69,6 +69,7 @@ class TestContentEndpoint:
     def test_content_with_valid_url(self, client: TestClient):
         response = client.post("/content", json={"url": "https://example.com", "steps": 0})
         assert response.status_code == 200
+        assert response.headers["X-Final-Url"] == "https://example.com"
 
     def test_content_default_output_is_text(self, client: TestClient):
         response = client.post("/content", json={"steps": 0})
@@ -82,6 +83,37 @@ class TestContentEndpoint:
         )
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
+
+    def test_content_can_return_html_with_network_trace(self, client: TestClient):
+        response = client.post(
+            "/content",
+            json={
+                "url": "https://example.com",
+                "output_action": "html",
+                "include_network_trace": True,
+                "steps": 0,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/json"
+        assert response.headers["X-Final-Url"] == "https://example.com"
+        assert response.json() == {
+            "content": "<html><body>Test</body></html>",
+            "content_type": "text/html",
+            "content_encoding": "utf-8",
+            "final_url": "https://example.com",
+            "navigation_status": None,
+            "network_trace": {"entries": [], "dropped": 0},
+        }
+
+    def test_content_rejects_network_trace_limit_above_cap(self, client: TestClient):
+        response = client.post(
+            "/content",
+            json={"include_network_trace": True, "network_trace_limit": 5001, "steps": 0},
+        )
+
+        assert response.status_code == 422
 
     def test_content_output_screenshot(self, client: TestClient):
         response = client.post(

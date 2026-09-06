@@ -11,6 +11,17 @@ USER 0
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# Use Yandex Ubuntu mirror (archive.ubuntu.com is unreliable from RU)
+# Handles both legacy /etc/apt/sources.list and noble's deb822 .sources files
+RUN set -eux; \
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do \
+        [ -f "$f" ] || continue; \
+        sed -i \
+            -e 's|http[s]*://archive.ubuntu.com/ubuntu|http://mirror.yandex.ru/ubuntu|g' \
+            -e 's|http[s]*://security.ubuntu.com/ubuntu|http://mirror.yandex.ru/ubuntu|g' \
+            "$f"; \
+    done
+
 # Install system dependencies for screenshot functionality and display detection
 # Also install CJK fonts so Chrome can render Chinese/Japanese/Korean characters
 RUN apt-get update && \
@@ -18,10 +29,30 @@ RUN apt-get update && \
     gnome-screenshot \
     scrot \
     x11-utils \
+    curl \
+    libnspr4 \
+    libnss3 \
+    libasound2t64 \
+    libatk-bridge2.0-0t64 \
+    libatk1.0-0t64 \
+    libatspi2.0-0t64 \
+    libcups2t64 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgtk-3-0t64 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    locales \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
     fonts-wqy-zenhei \
     fonts-wqy-microhei \
+    && sed -i 's/^# ru_RU.UTF-8 UTF-8/ru_RU.UTF-8 UTF-8/' /etc/locale.gen \
+    && locale-gen ru_RU.UTF-8 \
     && fc-cache -fv \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -35,10 +66,9 @@ WORKDIR "${HOME}"/Desktop/app
 # Copy only dependency files first (for better caching)
 COPY pyproject.toml uv.lock ./
 
-# Install Python dependencies and Chrome (cached layer)
+# Install Python dependencies (cached layer)
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev
-RUN uv run patchright install chrome
 
 # Now copy the rest of the application code
 COPY . .
@@ -51,8 +81,15 @@ COPY . .
 # Fix permissions for startup script modification
 RUN chmod 666 /etc/passwd /etc/group
 
-# Ensure the app directory and cache are owned by the headless user
-RUN chown -R "${HEADLESS_USER_ID}":"${HEADLESS_USER_GROUP_ID}" "${HOME}"/Desktop/app "${HOME}"/.cache "${HOME}"/.local
+# Ensure the copied app and uv-managed Python are owned by the runtime user.
+# Do not recursively chown the base image's whole cache: it creates a large,
+# memory-heavy Docker layer. CfT is installed into that cache after USER below.
+RUN chown -R "${HEADLESS_USER_ID}":"${HEADLESS_USER_GROUP_ID}" "${HOME}"/Desktop/app "${HOME}"/.local
+
+# The base image owns $HOME/.cache as root. Create only the registry directory
+# needed by the runtime user instead of recursively chowning the whole cache.
+RUN mkdir -p "${HOME}/.cache/ms-playwright" && \
+    chown "${HEADLESS_USER_ID}":"${HEADLESS_USER_GROUP_ID}" "${HOME}/.cache/ms-playwright"
 
 # Create a custom startup script that waits for VNC, then runs main.py
 RUN printf '%s\n' \
@@ -110,6 +147,28 @@ RUN printf '%s\n' \
 
 # Switch back to headless user
 USER "${HEADLESS_USER_ID}"
+
+# Install Chrome for Testing for the runtime user (into the Playwright
+# registry cache, so core/browser.py's pipe mode finds it automatically).
+#
+# Why: the retail /opt/google/chrome in the base image silently ignores
+# --remote-debugging-port and --remote-debugging-pipe in this container —
+# its DevTools remote-debugging server is gated behind a user-consent flow
+# that cannot be completed unattended (no port/pipe is ever opened, no
+# "DevTools listening" in logs, verified empirically). Chrome for Testing
+# is built from the same source base as retail Chrome (identical UA/TLS/JS
+# fingerprint) but has no such gate, which is why Playwright automation
+# uses it. Pin the version for reproducible builds; bump with Chrome.
+ARG CHROME_CFT_VERSION=152.0.7977.82
+RUN set -eux; \
+    ver="$CHROME_CFT_VERSION"; \
+    cache="$HOME/.cache/ms-playwright"; \
+    mkdir -p "$cache/chrome-$ver"; \
+    curl -fsSL "https://storage.googleapis.com/chrome-for-testing-public/$ver/linux64/chrome-linux64.zip" -o /tmp/cft.zip; \
+    python3 -c "import zipfile; zipfile.ZipFile('/tmp/cft.zip').extractall('$cache/chrome-$ver')"; \
+    chmod +x "$cache/chrome-$ver/chrome-linux64/chrome" "$cache/chrome-$ver/chrome-linux64/chrome_crashpad_handler" 2>/dev/null || true; \
+    rm -f /tmp/cft.zip; \
+    "$cache/chrome-$ver/chrome-linux64/chrome" --version
 
 # Use custom entrypoint that starts main.py then hands off to VNC startup
 ENTRYPOINT ["/usr/local/bin/custom-startup.sh"]

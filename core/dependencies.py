@@ -1,3 +1,5 @@
+import os
+import json
 import uuid
 import logging
 from typing import Annotated, Optional, AsyncGenerator
@@ -38,6 +40,18 @@ async def get_browser_info(
 BrowserInfoDep = Annotated[BrowserInfo, Depends(get_browser_info)]
 
 
+async def apply_fingerprint_fixes(page: Page) -> None:
+    """Align the page's JS fingerprint with the declared UA (e.g. Windows UA
+    on a Linux container). Called for every new page, regardless of how the
+    session was created (``/start_session`` or ad-hoc via ``PageDep``)."""
+    platform_override = os.environ.get("CHROME_PLATFORM_OVERRIDE", "")
+    if platform_override:
+        await page.add_init_script(
+            "Object.defineProperty(navigator, 'platform', "
+            "{get: () => %s});" % json.dumps(platform_override)
+        )
+
+
 async def get_or_create_page(
     request: Request,
     browser_info: BrowserInfoDep,
@@ -66,6 +80,15 @@ async def get_or_create_page(
 
     if page is None:
         page = await browser_info.context.new_page()
+        # Optional fingerprint fix: align navigator.platform with the
+        # declared UA (e.g. Windows UA on a Linux container) when the
+        # operator sets CHROME_PLATFORM_OVERRIDE.
+        platform_override = os.environ.get("CHROME_PLATFORM_OVERRIDE", "")
+        if platform_override:
+            await page.add_init_script(
+                "Object.defineProperty(navigator, 'platform', "
+                "{get: () => %s});" % json.dumps(platform_override)
+            )
         pages[session_id] = page
         logger.info(f"Created new page for session {session_id} (ad-hoc={is_ad_hoc})")
 

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from patchright.async_api import async_playwright
 
 from core.browser import browser_manager, cleanup_profile_locks, PROFILES_DIR, DEFAULT_BROWSER_ID
-from routes import health, browsers, search, content, interact, attribute
+from routes import health, browsers, search, content, interact, attribute, lenta, utkonos
 
 
 # ==================== Logging ====================
@@ -77,6 +77,8 @@ app.include_router(search.router)
 app.include_router(content.router)
 app.include_router(interact.router)
 app.include_router(attribute.router)
+app.include_router(lenta.router)
+app.include_router(utkonos.router)
 
 
 if __name__ == "__main__":

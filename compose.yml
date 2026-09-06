@@ -11,11 +11,36 @@ services:
       # noVNC web interface
       - "6901:6901"
       # FastAPI Controller
-      - "8000:8000"
+      - "18000:8000"
     environment:
       - VNC_PW=headless
       - VNC_RESOLUTION=1920x1080
       - DISPLAY=:1
+      # RU fingerprint: some WAFs flag UTC/en-US browsers hitting from RU IPs
+      - TZ=Europe/Moscow
+      - LANG=ru_RU.UTF-8
+      - LANGUAGE=ru_RU:ru
+      - LC_ALL=ru_RU.UTF-8
+      # Browser fingerprint: navigator.language + UA (must match egress geo)
+      - CHROME_LANG=ru-RU
+      - CHROME_LOCALE=ru-RU
+      # CDP mode: launch Chrome with minimal flags and attach over the
+      # DevTools port. Required for sites whose WAF blocks browsers started
+      # with the full Playwright argument set (e.g. av.ru). In CDP mode the
+      # UA/platform are taken from the real Chrome build (no spoofing).
+      - BROWSER_CDP_MODE=1
+      # Headful Chrome-for-Testing is launched as a normal X11 application and
+      # Patchright attaches over its local DevTools TCP endpoint. This keeps the
+      # controlled browser visible in the container's VNC desktop.
+      - CHROME_CDP_TRANSPORT=tcp
+      - CHROME_HEADLESS=0
+      - CHROME_BIN=/home/headless/.cache/ms-playwright/chrome-152.0.7977.82/chrome-linux64/chrome
+      - CHROME_CDP_PORT_BASE=9333
+      # No kernel namespace support in this container: Chrome sandbox off.
+      - CHROME_NO_SANDBOX=1
+      # Container has no GPU: keep the software WebGL renderer explicit
+      # (same behaviour as the old Playwright launch path).
+      - CHROME_CDP_EXTRA_ARGS=--no-sandbox,--no-first-run,--start-maximized,--use-angle=swiftshader,--enable-unsafe-swiftshader
     volumes:
       # Mount profiles directory from host with read/write access
       # Create your profile directory on host: mkdir -p ./profiles/myprofile
@@ -27,8 +52,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: '4gb'
+          cpus: '4'
+          memory: '8gb'
         reservations:
           cpus: '0.5'
           memory: '2gb'

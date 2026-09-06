@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Literal, List, Optional
+from typing import Any, Dict, Literal, List, Optional
 from datetime import datetime, timezone
 
 
@@ -12,6 +12,51 @@ class BrowserResponse(BaseModel):
     browser_id: str
     profile_path: Optional[str]
     session_count: int
+
+
+class NetworkTraceQueryParameter(BaseModel):
+    name: str
+    value: str
+
+
+class NetworkTraceEntry(BaseModel):
+    url: str
+    query_parameter_names: List[str] = Field(default_factory=list)
+    query_parameters: List[NetworkTraceQueryParameter] = Field(default_factory=list)
+    method: str
+    resource_type: str
+    is_navigation_request: bool
+    frame_url: str
+    redirected_from_url: Optional[str] = None
+    request_headers: Dict[str, str] = Field(default_factory=dict)
+    post_data: Optional[str] = None
+    post_data_base64: Optional[str] = None
+    request_timing: Dict[str, float] = Field(default_factory=dict)
+    request_sizes: Optional[Dict[str, int]] = None
+    status: Optional[int] = None
+    status_text: Optional[str] = None
+    content_type: Optional[str] = None
+    response_headers: Dict[str, str] = Field(default_factory=dict)
+    from_service_worker: Optional[bool] = None
+    server_addr: Optional[Dict[str, Any]] = None
+    security_details: Optional[Dict[str, Any]] = None
+    failure: Optional[str] = None
+    started_ms: float
+    duration_ms: Optional[float] = None
+
+
+class NetworkTraceSnapshot(BaseModel):
+    entries: List[NetworkTraceEntry] = Field(default_factory=list)
+    dropped: int = 0
+
+
+class ContentWithNetworkTraceResponse(BaseModel):
+    content: str
+    content_type: str
+    content_encoding: Literal["utf-8", "base64"]
+    final_url: str
+    navigation_status: Optional[int] = None
+    network_trace: NetworkTraceSnapshot
 
 
 class RatingMetadata(BaseModel):
