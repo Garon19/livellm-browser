@@ -5,6 +5,12 @@
 # FROM accetto/ubuntu-vnc-xfce-firefox-g3:latest
 FROM accetto/ubuntu-vnc-xfce-g3:24.04
 
+# The LiveLLM Browser operator runs Browser pods as uid/gid 1000.
+# Match its fixed Kubernetes securityContext instead of relying on the base
+# image's one-shot dynamic user generator (which cannot modify its root-owned
+# bootstrap file when the pod is started as a non-root UID).
+ENV HEADLESS_USER_ID=1000 HEADLESS_USER_GROUP_ID=1000
+
 # Switch to root to install dependencies
 # USER root
 USER 0
@@ -80,6 +86,14 @@ COPY . .
 
 # Fix permissions for startup script modification
 RUN chmod 666 /etc/passwd /etc/group
+
+# Disable the base image's one-shot dynamic user generator. It is needed only
+# when `docker run --user <arbitrary uid>` is used; the operator always uses
+# the fixed uid/gid above. Its password file is root-owned and otherwise makes
+# the non-root Kubernetes start fail before VNC starts.
+RUN chown -R "${HEADLESS_USER_ID}":"${HEADLESS_USER_GROUP_ID}" \
+        "${HOME}" /dockerstartup && \
+    : > /dockerstartup/.initial_sudo_password
 
 # Ensure the copied app and uv-managed Python are owned by the runtime user.
 # Do not recursively chown the base image's whole cache: it creates a large,
