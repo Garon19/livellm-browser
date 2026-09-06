@@ -113,6 +113,7 @@ RUN printf '%s\n' \
     '# Track child PIDs for graceful shutdown' \
     'STARTUP_PID=""' \
     'APP_PID=""' \
+    'CDP_PROXY_PID=""' \
     '' \
     '# Graceful shutdown handler' \
     'shutdown() {' \
@@ -153,6 +154,11 @@ RUN printf '%s\n' \
     'cd /home/headless/Desktop/app && /bin/uv run main.py 2>&1 &' \
     'APP_PID=$!' \
     'echo "main.py started (PID $APP_PID)"' \
+    '' \
+    '# Stable legacy CDP endpoint for the LiveLLM operator.' \
+    'cd /home/headless/Desktop/app && /bin/uv run uvicorn cdp_proxy:app --host 0.0.0.0 --port 9222 2>&1 &' \
+    'CDP_PROXY_PID=$!' \
+    'echo "CDP proxy started (PID $CDP_PROXY_PID)"' \
     '' \
     '# Wait for any child to exit (keeps container running)' \
     'wait -n 2>/dev/null || wait' \
