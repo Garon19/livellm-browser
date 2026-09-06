@@ -15,6 +15,9 @@ Built with FastAPI, Patchright (undetectable Playwright fork), and runs in a Doc
 - **Session Management** — Multiple isolated browser tabs via `X-Session-Id` header
 - **Page Interactions** — Scroll, mouse move/click, idle, login, CSS/XPath selectors — all via unified `/interact` endpoint with configurable `output_action`
 - **Attribute Extraction** — Extract elements/attributes from page HTML using CSS or XPath selectors via `/attribute` endpoint (powered by BeautifulSoup + lxml)
+- **Network Trace** — Capture full request/response metadata (URLs, query params, headers, bodies, timings, sizes) alongside page content via `include_network_trace` on `/content`
+- **CDP Mode** — Optional browser launch mode (`BROWSER_CDP_MODE=1`): Chrome starts as a regular X11 application with minimal flags and Patchright attaches over the DevTools port, for sites whose WAF flags browsers started with the full Playwright argument set
+- **Storefront Endpoints** — Dedicated `/lenta/*` and `/utkonos/*` routes that bootstrap a real storefront session and fetch product/catalog data through the site's own API
 
 ## Quick Start
 
@@ -173,6 +176,27 @@ Get page content with automatic scrolling. This is a shortcut that:
 | `steps` | `8` | Number of scroll steps (0 = no scroll, 4-12 recommended). |
 | `step_delay` | `1.5` | Seconds between scroll steps. |
 | `step_pixels` | `1500` | Pixels per scroll step. |
+| `include_network_trace` | `false` | Return content plus a bounded network trace in a JSON envelope (see below). |
+| `network_trace_limit` | `1000` | Maximum network entries returned when tracing is enabled (1–5000). |
+
+##### Network Trace
+
+Set `include_network_trace: true` to capture what the browser actually sent and received while loading the page. Instead of raw content, `/content` returns a JSON envelope:
+
+```json
+{
+  "content": "...",
+  "content_type": "text/plain",
+  "content_encoding": "utf-8",
+  "final_url": "https://example.com/",
+  "navigation_status": 200,
+  "network_trace": [ ... ]
+}
+```
+
+Each `network_trace` entry contains full request/response metadata: complete URL, parsed query parameters, method, resource type, redirect chain, request/response headers, request bodies (`post_data` / `post_data_base64`), timings, sizes, and TLS `security_details`. Screenshots are returned base64-encoded in the envelope. The trace is capped by `network_trace_limit` (default 1000, max 5000) — entries beyond the limit are dropped, not truncated.
+
+This is useful for reverse-engineering a site's internal APIs: load a page through the real browser (with its WAF-passing fingerprint), then read the XHR/fetch calls it made directly from the trace.
 
 **Examples:**
 
@@ -486,6 +510,28 @@ curl -X POST http://localhost:8000/attribute \
 
 ---
 
+### Lenta
+
+Session-scoped endpoints for [lenta.com](https://lenta.com). `bootstrap` opens the real storefront in the browser session, waits for the region/anti-bot context to settle, and caches it; item fetches then go through the site's own JSON API with the browser's cookies and forwarded client headers.
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /lenta/bootstrap` | Bootstrap a storefront context for the current session (call once per session). |
+| `POST /lenta/items/{product_id}` | Fetch one canonical product by ID. `url` must be a canonical `https://lenta.com/product/...-<id>/` link. |
+| `GET /lenta/metrics` | Cache metrics for the bootstrapped contexts. |
+
+### Utkonos
+
+Session-scoped endpoints for [utkonos.ru](https://utkonos.ru), same pattern: `bootstrap` establishes the real session, catalog and item fetches use the site's own API.
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /utkonos/bootstrap` | Bootstrap a storefront context for the current session. |
+| `GET /utkonos/categories` | List catalog categories (leaf categories are the API-drivable ones). |
+| `POST /utkonos/catalog/items` | Fetch one bounded catalog page: `{ "category_id": "...", "limit": 40, "offset": 0 }`. |
+| `POST /utkonos/items/{product_id}` | Fetch one canonical product by SKU (`https://utkonos.ru/item/<sku>/`). |
+| `GET /utkonos/metrics` | Cache metrics. |
+
 ### Search
 
 #### `POST /search`
@@ -686,6 +732,24 @@ if __name__ == "__main__":
 | `VNC_PW` | `headless` | VNC password |
 | `VNC_RESOLUTION` | `1920x1080` | Screen resolution |
 | `DISPLAY` | `:1` | X display number |
+| `BROWSER_CDP_MODE` | _(off)_ | `1`/`true`/`yes` enables CDP mode (see below). |
+| `CHROME_CDP_TRANSPORT` | `tcp` | DevTools transport: `tcp` (recommended) or `pipe`. |
+| `CHROME_HEADLESS` | `0` | `0` keeps Chrome headful in the VNC desktop (recommended for CDP mode). |
+| `CHROME_BIN` | _(auto)_ | Explicit path to the Chrome binary. |
+| `CHROME_CDP_PORT_BASE` | `9333` | Base port for per-browser DevTools endpoints. |
+| `CHROME_NO_SANDBOX` | _(off)_ | `1` disables the Chrome sandbox (needed when the container lacks kernel namespace support). |
+| `CHROME_CDP_EXTRA_ARGS` | _(none)_ | Comma-separated extra Chrome flags (e.g. `--no-first-run,--start-maximized`). |
+| `CHROME_LANG` / `CHROME_LOCALE` | _(container locale)_ | Browser `navigator.language` / locale; keep consistent with your egress IP geo to avoid WAF flags. |
+
+### CDP Mode
+
+Some WAFs (e.g. av.ru) flag browsers started with the full Playwright/Patchright argument set. CDP mode inverts the launch: Chrome is started **as a regular X11 application** with minimal flags, and Patchright then attaches to it over its local DevTools endpoint (`connect_over_cdp`). The controlled browser keeps a genuine fingerprint (real UA/platform from the actual Chrome build, no spoofing) and stays visible in the container's VNC desktop.
+
+Enable with `BROWSER_CDP_MODE=1` (see `compose.yml` for a full working setup). Notes:
+
+- CDP mode requires a `profile_uid` (persistent profile); proxy is **not supported** in this mode and is ignored with a warning.
+- `CHROME_CDP_TRANSPORT=tcp` launches headful Chrome-for-Testing as a normal X11 app; `pipe` uses the stdio transport instead.
+- Works alongside the standard Patchright launch path — the flag simply selects which `_create_browser_*` implementation runs.
 
 ### Kubernetes / Helm
 
@@ -701,24 +765,30 @@ helm install livellm-browser ./livellm-browser-chart
 livellm-browser/
 ├── main.py               # FastAPI app entry point & lifespan
 ├── core/
-│   ├── browser.py         # BrowserManager, BrowserInfo, profile management
+│   ├── browser.py         # BrowserManager, BrowserInfo, profile management, CDP launch path
+│   ├── network_trace.py   # NetworkTraceRecorder (bounded request/response capture)
 │   └── dependencies.py    # FastAPI dependency injection (PageDep, etc.)
 ├── routes/
 │   ├── health.py          # GET /ping
 │   ├── browsers.py        # Browser & session CRUD
 │   ├── search.py          # POST /search (Google)
-│   ├── content.py         # POST /content (scroll + extract shortcut)
+│   ├── content.py         # POST /content (scroll + extract, optional network trace)
 │   ├── interact.py        # POST /interact (actions + selectors + output)
-│   └── attribute.py       # POST /attribute (BS4/lxml data extraction)
+│   ├── attribute.py       # POST /attribute (BS4/lxml data extraction)
+│   ├── lenta.py           # /lenta/* storefront endpoints
+│   └── utkonos.py         # /utkonos/* storefront endpoints
 ├── helpers/
 │   ├── playwright.py      # Locator builders, scroll helpers
 │   └── bs.py              # BeautifulSoup / lxml extraction helpers
 ├── models/
 │   ├── requests.py        # Pydantic request models & OutputAction enum
-│   └── responses.py       # Pydantic response models
+│   └── responses.py       # Pydantic response models (incl. network trace envelope)
 ├── tests/
 │   ├── conftest.py        # Pytest fixtures with mocked browser
-│   └── test_smoke.py      # Smoke tests for all endpoints
+│   ├── test_smoke.py      # Smoke tests for all endpoints
+│   ├── test_network_trace.py
+│   ├── test_lenta.py
+│   └── test_utkonos.py
 ├── parse.py               # Example crawler script (uses the API)
 ├── Dockerfile
 ├── compose.yml
