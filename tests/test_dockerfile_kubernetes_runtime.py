@@ -10,4 +10,5 @@ def test_dockerfile_is_compatible_with_browser_operator_uid_1000():
 
     assert "ENV HEADLESS_USER_ID=1000 HEADLESS_USER_GROUP_ID=1000" in dockerfile
     assert ": > /dockerstartup/.initial_sudo_password" in dockerfile
+    assert "ENV CHROME_BIN=/home/headless/.local/bin/livellm-chrome" in dockerfile
     assert 'USER "${HEADLESS_USER_ID}"' in dockerfile

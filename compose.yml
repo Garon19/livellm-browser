@@ -34,7 +34,7 @@ services:
       # controlled browser visible in the container's VNC desktop.
       - CHROME_CDP_TRANSPORT=tcp
       - CHROME_HEADLESS=0
-      - CHROME_BIN=/home/headless/.cache/ms-playwright/chrome-152.0.7977.82/chrome-linux64/chrome
+      - CHROME_BIN=/home/headless/.local/bin/livellm-chrome
       - CHROME_CDP_PORT_BASE=9333
       # No kernel namespace support in this container: Chrome sandbox off.
       - CHROME_NO_SANDBOX=1

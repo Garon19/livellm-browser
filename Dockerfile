@@ -182,7 +182,13 @@ RUN set -eux; \
     python3 -c "import zipfile; zipfile.ZipFile('/tmp/cft.zip').extractall('$cache/chrome-$ver')"; \
     chmod +x "$cache/chrome-$ver/chrome-linux64/chrome" "$cache/chrome-$ver/chrome-linux64/chrome_crashpad_handler" 2>/dev/null || true; \
     rm -f /tmp/cft.zip; \
-    "$cache/chrome-$ver/chrome-linux64/chrome" --version
+    mkdir -p "$HOME/.local/bin"; \
+    ln -sf "$cache/chrome-$ver/chrome-linux64/chrome" "$HOME/.local/bin/livellm-chrome"; \
+    "$HOME/.local/bin/livellm-chrome" --version
+
+# Stable runtime path: do not expose the versioned CfT cache directory to
+# Compose or Kubernetes manifests.
+ENV CHROME_BIN=/home/headless/.local/bin/livellm-chrome
 
 # Use custom entrypoint that starts main.py then hands off to VNC startup
 ENTRYPOINT ["/usr/local/bin/custom-startup.sh"]
